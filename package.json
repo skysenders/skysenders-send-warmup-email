@@ -1,0 +1,9 @@
+{
+  "name": "xyzmailer-send-email-lambda",
+  "version": "1.0.0",
+  "dependencies": {
+    "handlebars": "^4.7.9",
+    "html-to-text": "^9.0.5",
+    "nodemailer": "^7.0.3"
+  }
+}
