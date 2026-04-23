@@ -4,6 +4,9 @@ const {
   fetchWarmupIdentifier,
   updateWarmupStats,
   deleteWarmupReplyTriggers,
+  handleSenderFailureErrors,
+  handleMailboxForwardingErrors,
+  resetMailboxDisconnectStage
 } = require("../backend.client");
 
 const { sendMail } = require("../send_email/index");
@@ -60,7 +63,7 @@ async function processReply(payload) {
   body = compileHandlebarsTemplate(body, templateData);
 
   // generate messageId
-  const messageId = generateMessageId(sender.user_id, sender.id, receiver.id, sender.email, 'R');
+  const messageId = generateMessageId(receiver.user_id, receiver.id, sender.id, sender.email, 'R');
   
   console.log("Sending warmup reply email from:", sender.email, "to:", receiver.email, "with messageId:", message_id);
   // send the email using the sender's SMTP credentials
@@ -86,34 +89,63 @@ inReplyTo: message_id,
 references: [message_id],
   });
 
-  // determine if we should schedule the next reply based on the reply rate and daily target
-  const nextReplyExists = !!content[`reply_body_${reply_count + 1}`];
-  const replyTime = nextReplyExists ? getRandomReplyTime() : null;
+  if(result.is_sent) {
+    // determine if we should schedule the next reply based on the reply rate and daily target
+    const nextReplyExists = !!content[`reply_body_${reply_count + 1}`];
+    const replyTime = nextReplyExists ? getRandomReplyTime() : null;
 
-  console.log("Updating the warmup message details:", result.messageId, "Next reply exists:", nextReplyExists, "Reply time for next reply (if exists):", replyTime);
-  // update warmup stats and delete any existing triggers in parallel
-  await Promise.all([
-    updateWarmupStats(
-      {
+    console.log("Updating the warmup message details:", result.messageId, "Next reply exists:", nextReplyExists, "Reply time for next reply (if exists):", replyTime);
+    // update warmup stats and delete any existing triggers in parallel
+    await Promise.all([
+      updateWarmupStats(
+        {
+          user_id: sender.user_id,
+          mailbox_id: sender.id,
+          mailbox_email: sender.email,
+          provider: sender.esp_type,
+        },
+        {
+          user_id: receiver.user_id,
+          mailbox_id: receiver.id,
+          mailbox_email: receiver.email,
+          provider: receiver.esp_type,
+        },
+        new Date().toISOString(),
+        result.messageId,
+        content.id,
+        replyTime,
+        nextReplyExists ? reply_count + 1 : null
+      ),
+      deleteWarmupReplyTriggers(payload.id),
+    ]);
+    // reset disconnect stage if email sent successfully after a failure
+    if(sender.disconnect_stage) {
+      await resetMailboxDisconnectStage({
         user_id: sender.user_id,
         mailbox_id: sender.id,
-        mailbox_email: sender.email,
-        provider: sender.esp_type,
-      },
-      {
-        user_id: receiver.user_id,
-        mailbox_id: receiver.id,
-        mailbox_email: receiver.email,
-        provider: receiver.esp_type,
-      },
-      new Date().toISOString(),
-      result.messageId,
-      content.id,
-      replyTime,
-      nextReplyExists ? reply_count + 1 : null
-    ),
-    deleteWarmupReplyTriggers(payload.id),
-  ]);
+      });
+    }
+  } else {
+    // mark the mailbox as disocnnected or pause for a while based on the error
+    console.error("Failed to send warmup reply email:", result);
+    
+    if (result.message.includes('be forwarded from') && sender) {
+      return await handleMailboxForwardingErrors({
+        userId: sender.user_id,
+        mailboxId: sender.id,
+        errorMessage: result.message,
+      });
+    }
+    // find out disconnect stage
+    const disconnectStage = (sender?.disconnect_stage || 0) + 1;
+    // handle IMAP specific failures
+    return await handleSenderFailureErrors({
+      userId: sender.user_id,
+      mailboxId: sender.id,
+      disconnectStage,
+      disconnectReason: result.message, 
+    });
+  }
 }
 
 module.exports = { processReply };

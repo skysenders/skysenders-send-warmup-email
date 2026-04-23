@@ -1,5 +1,6 @@
 const axios = require('axios');
 const MailComposer = require('nodemailer/lib/mail-composer');
+const nodemailer = require('nodemailer');
 
 /**
  * Sends an email using Gmail REST API via direct Axios call.
@@ -28,17 +29,28 @@ exports.sendMailWithGmailAPI = async (
 
     // 1. Setup Privacy Headers (Removing Nodemailer footprint)
     const customHeaders = {
-      'X-Mailer': false,
-      'User-Agent': false,
+      'X-Mailer': '',
+      'User-Agent': '',
     };
 
     if (unsubscribeLink && addUnsubscribeTag) {
       customHeaders['List-Unsubscribe'] = `<${unsubscribeLink}>`;
       customHeaders['List-Unsubscribe-Post'] = 'List-Unsubscribe=One-Click';
     }
+    
+    // create transporter using Gmail SMTP with OAuth2 (fallback for token issues)
+    const transporter = nodemailer.createTransport({
+      host: 'smtp.gmail.com',
+      port: 465,
+      secure: true,
+      auth: {
+        type: 'OAuth2',
+        user: from,
+        accessToken: token.access_token,
+      },
+    });
 
-    // 2. Compose the MIME message using Nodemailer Composer
-    const mail = new MailComposer({
+    const info = await transporter.sendMail({
       from,
       to,
       bcc,
@@ -47,41 +59,21 @@ exports.sendMailWithGmailAPI = async (
       html: messageInHtml,
       attachments,
       messageId,
+      keepBcc: true,
       replyTo: replyTo || from,
       inReplyTo,
       references,
+      priority: 'normal',
       headers: customHeaders,
-      keepBcc: true,
-      priority: 'normal'
-    }).compile();
-
-    const rawBuffer = await mail.build();
-
-    // 3. Encode to Base64URL (Strictly required by Gmail API)
-    const encodedMessage = rawBuffer
-      .toString('base64')
-      .replace(/\+/g, '-')
-      .replace(/\//g, '_')
-      .replace(/=+$/, '');
-
-    // 4. Direct Axios POST to Gmail API
-    const res = await axios({
-      method: 'POST',
-      url: 'https://gmail.googleapis.com/gmail/v1/users/me/messages/send',
-      headers: {
-        'Authorization': `Bearer ${token.access_token}`,
-        'Content-Type': 'application/json'
-      },
-      data: {
-        raw: encodedMessage,
-      },
     });
 
+    console.log(`Email sent via Gmail SMTP for: ${to} with messageId: ${messageId}`);
+
     return {
+      ...info,
       is_sent: true,
-      message: 'Email sent successfully via Gmail API',
-      messageId: res.data.id,
-      threadId: res.data.threadId
+      message: 'Email sent successfully via Gmail SMTP',
+      messageId
     };
 
   } catch (e) {

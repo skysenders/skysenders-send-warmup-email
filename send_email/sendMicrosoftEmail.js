@@ -2,6 +2,17 @@ const axios = require('axios');
 const MailComposer = require('nodemailer/lib/mail-composer');
 
 /**
+ * Microsoft send API payload
+ */
+const options = {
+  url: 'https://graph.microsoft.com/v1.0/me/sendMail',
+  method: 'POST',
+  headers: {
+    'Content-Type': 'text/plain',
+  }
+};
+
+/**
  * Sends an email using Microsoft Graph REST API.
  * Handles headers and MIME composition in one place.
  */
@@ -28,8 +39,8 @@ exports.sendMailWithMicrosoftToken = async (
 
     // 1. Setup Privacy Headers
     const customHeaders = {
-      'X-Mailer': false,
-      'User-Agent': false,
+      'X-Mailer': '',
+      'User-Agent': '',
     };
 
     if (unsubscribeLink && addUnsubscribeTag) {
@@ -62,8 +73,13 @@ exports.sendMailWithMicrosoftToken = async (
     // build the raw message
     const raw = await mail.build();
 
+    // set the data for Microsoft Graph API
+    options.data = Buffer.from(raw).toString('base64');
+
     // eslint-disable-next-line no-undef
-    await makeAPIRequest(options, Buffer.from(raw).toString('base64'));
+    const response = await axios(options);
+
+    console.log(`Microsoft Graph API response status: ${response.status} for messageId: ${messageId}`, response.data); 
 
     console.log(`Message sent: ${messageId}  with microsoft API call`);
 

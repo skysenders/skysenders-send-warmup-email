@@ -40,16 +40,14 @@ exports.sendSMTPMail = async (
 
     // initialize headers with default values
     const headers = {
-        'X-Mailer': false,
-        'User-Agent': false,
+        'X-Mailer': '',
+        'User-Agent': '',
       };
 
     if (unsubscribeLink && addUnsubscribeTag) {
       headers['List-Unsubscribe'] = `<${unsubscribeLink}>`;
       headers['List-Unsubscribe-Post'] = 'List-Unsubscribe=One-Click';
     }
-
-    const finalMessageId = messageId;
 
     const info = await transporter.sendMail({
       from,
@@ -59,7 +57,7 @@ exports.sendSMTPMail = async (
       text: messageInText || '',
       html: messageInHtml,
       attachments,
-      messageId: finalMessageId,
+      messageId,
       keepBcc: true,
       replyTo: replyTo || from,
       inReplyTo,
@@ -72,7 +70,7 @@ exports.sendSMTPMail = async (
       ...info,
       is_sent: true,
       message: 'Email sent successfully',
-      messageId: finalMessageId
+      messageId
     };
 
   } catch (e) {

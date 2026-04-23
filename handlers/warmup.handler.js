@@ -4,6 +4,9 @@ const {
   fetchWarmupMessage,
   fetchWarmupIdentifier,
   updateWarmupStats,
+  handleSenderFailureErrors,
+  handleMailboxForwardingErrors,
+  resetMailboxDisconnectStage
 } = require("../backend.client");
 
 const { sendMail } = require("../send_email/index");
@@ -44,7 +47,7 @@ exports.processWarmup = async (payload) => {
   body = compileHandlebarsTemplate(body, templateData);
 
   // generate a unique message ID for the email
-  const messageId = generateMessageId(sender.user_id, sender.id, receiver.id, sender.email, 'W');
+  const messageId = generateMessageId(receiver.user_id, receiver.id, sender.id, sender.email, 'W');
 
   console.log("Sending warmup email from:", sender.email, "to:", receiver.email, "with messageId:", messageId);
   // send the email using the sender's SMTP credentials
@@ -70,30 +73,59 @@ exports.processWarmup = async (payload) => {
     },
   );
 
-  // check if a reply is needed based on the daily target, sent today count, and reply rate
-  const needReply = shouldReply(daily_target, sent_today + 1, reply_rate);
-  const replyTime = needReply ? getRandomReplyTime() : null;
+  if(result.is_sent) {
+    // check if a reply is needed based on the daily target, sent today count, and reply rate
+    const needReply = shouldReply(daily_target, sent_today + 1, reply_rate);
+    const replyTime = needReply ? getRandomReplyTime() : null;
 
-  console.log("Updating the warmup message details:", result.messageId, "Need reply:", needReply, "Reply time (if needed):", replyTime);
+    console.log("Updating the warmup message details:", result.messageId, "Need reply:", needReply, "Reply time (if needed):", replyTime);
 
-  // update the warmup stats in the backend with the result of the email sending and whether a reply is needed
-  await updateWarmupStats(
-    {
-      user_id: sender.user_id,
-      mailbox_id: sender.id,
-      mailbox_email: sender.email,
-      provider: sender.esp_type,
-    },
-    {
-      user_id: receiver.user_id,
-      mailbox_id: receiver.id,
-      mailbox_email: receiver.email,
-      provider: receiver.esp_type,
-    },
-    new Date().toISOString(),
-    result.messageId,
-    content.id,
-    replyTime,
-    needReply ? 1 : 0
-  );
+    // update the warmup stats in the backend with the result of the email sending and whether a reply is needed
+    await updateWarmupStats(
+      {
+        user_id: sender.user_id,
+        mailbox_id: sender.id,
+        mailbox_email: sender.email,
+        provider: sender.esp_type,
+      },
+      {
+        user_id: receiver.user_id,
+        mailbox_id: receiver.id,
+        mailbox_email: receiver.email,
+        provider: receiver.esp_type,
+      },
+      new Date().toISOString(),
+      result.messageId,
+      content.id,
+      replyTime,
+      needReply ? 1 : 0
+    );
+    // reset disconnect stage if email sent successfully after a failure
+    if(sender.disconnect_stage) {
+      await resetMailboxDisconnectStage({
+        user_id: sender.user_id,
+        mailbox_id: sender.id,
+      });
+    }
+  } else {
+    // check for sepcific error and mark mailbox as disconnected or pause for a while
+    console.error("Failed to send warmup email:", result);
+     
+    if (result.message.includes('be forwarded from') && sender) {
+      return await handleMailboxForwardingErrors({
+        userId: sender.user_id,
+        mailboxId: sender.id,
+        errorMessage: result.message,
+      });
+    }
+    // find out disconnect stage
+    const disconnectStage = (sender?.disconnect_stage || 0) + 1;
+    // handle IMAP specific failures
+    return await handleSenderFailureErrors({
+      userId: sender.user_id,
+      mailboxId: sender.id,
+      disconnectStage,
+      disconnectReason: result.message, 
+    });
+  }
 }

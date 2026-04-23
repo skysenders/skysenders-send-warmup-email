@@ -153,6 +153,36 @@ async function updateWarmupStats(
   });
 }
 
+/**
+ * Handle and log SMTP sending failures
+ */
+async function handleSenderFailureErrors(data) {
+  return post("/api/internal/handle-sender-failure-errors", {
+    user_id: data.userId,
+    mailbox_id: data.mailboxId,
+    disconnect_stage: data.disconnectStage,
+    disconnect_reason: data.disconnectReason,
+  });
+}
+
+/**
+ * Handle and log SMTP forwarding failures error
+ */
+async function handleMailboxForwardingErrors(data) {
+  return post("/api/internal/handle-mailbox-forwarding-errors", {
+    user_id: data.userId,
+    mailbox_id: data.mailboxId,
+    error_message: data.errorMessage,
+  });
+}
+
+/**
+ * Reset mailbox disconnect stage after successful email sending
+ */
+async function resetMailboxDisconnectStage(data) {
+  return post("/api/internal/reset-mailbox-disconnect-status", data);
+}
+
 /** ---------------------------------------------------
  *               EXPORTS
  * --------------------------------------------------- */
@@ -165,4 +195,7 @@ module.exports = {
   fetchWarmupIdentifier,
   deleteWarmupReplyTriggers,
   updateWarmupStats,
+  handleSenderFailureErrors,
+  handleMailboxForwardingErrors,
+  resetMailboxDisconnectStage
 };
